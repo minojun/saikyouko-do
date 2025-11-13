@@ -18,7 +18,6 @@ const flashcards = document.getElementById('flashcards');
 const flashBody = document.getElementById('flashBody');
 const nextLevelBtn = document.getElementById('nextLevelBtn');
 const restartBtn = document.getElementById('restartBtn');
-const homeBtn = document.getElementById('homeBtn');
 const closeSummaryBtn = document.getElementById('closeSummaryBtn');
 const closeFlashcardsBtn = document.getElementById('closeFlashcardsBtn');
 const debugKillEnemyBtn = document.getElementById('debugKillEnemyBtn');
@@ -35,8 +34,16 @@ const vegOverlayTitle = document.getElementById('vegOverlayTitle');
 const vegOverlayPenalty = document.getElementById('vegOverlayPenalty');
 const vegCountdown = document.getElementById('vegCountdown');
 const vegCountdownNumber = document.getElementById('vegCountdownNumber');
-const vegStartBtn = document.getElementById('vegStart');
+const vegPause = document.getElementById('vegPause');
+const vegPassOverlay = document.getElementById('vegPassOverlay');
+const vegPassAnswer = document.getElementById('vegPassAnswer');
+const vegPassBtn = document.getElementById('vegPass');
 const vegBackBtn = document.getElementById('vegBack');
+const vegResult = document.getElementById('vegResult');
+const vegResultBody = document.getElementById('vegResultBody');
+const vegNextSetBtn = document.getElementById('vegNextSetBtn');
+const vegRetryBtn = document.getElementById('vegRetryBtn');
+const closeVegResultBtn = document.getElementById('closeVegResultBtn');
 const vegNameEl = document.getElementById('vegName');
 const vegRoundEl = document.getElementById('vegRound');
 const vegDiffEl = document.getElementById('vegDiff');
@@ -762,7 +769,15 @@ const renderCardView = () => {
 };
 
 startBtn.onclick = () => { home.classList.add('hidden'); if (state.mode==='shoot') { summary.classList.add('hidden'); startLevel(); } else if (state.mode==='veg') { startVegRound(); } };
-pauseBtn.onclick = () => { if (state.mode==='shoot') { state.paused = !state.paused; updatePauseButtons(); } };
+pauseBtn.onclick = () => {
+  if (state.mode==='shoot') {
+    state.paused = !state.paused;
+    updatePauseButtons();
+  } else if (state.mode==='veg' && state.veg.started) {
+    state.paused = !state.paused;
+    updateVegPause();
+  }
+};
 nextLevelBtn.onclick = () => { home.classList.add('hidden'); summary.classList.add('hidden'); state.levelIndex = (state.levelIndex+1)%levels.length; state.themeIndex = state.levelIndex; startLevel(); };
 restartBtn.onclick = () => { home.classList.add('hidden'); summary.classList.add('hidden'); if (state.mode==='shoot') startLevel(); else if (state.mode==='veg') { resetVegRound(); } };
 summaryToggleBtn.onclick = () => { home.classList.add('hidden'); if (summary.classList.contains('hidden')) { summary.classList.remove('hidden'); state.summaryReady=false; summaryToggleBtn.textContent='Summary'; } else { summary.classList.add('hidden'); } };
@@ -797,9 +812,14 @@ const initHome = () => {
   flashcards.classList.add('hidden');
   if (state.veg.timerId) { clearInterval(state.veg.timerId); state.veg.timerId=null; }
   state.running = false;
+  state.paused = false;
   state.mode='home';
+  if (vegPause) vegPause.classList.add('hidden');
   answerInput.classList.remove('bottom-input');
   document.body.classList.remove('veg-mode');
+  // デバッグボタンを非表示
+  if (debugKillEnemyBtn) debugKillEnemyBtn.style.display = 'none';
+  if (debugSpawnEnemyBtn) debugSpawnEnemyBtn.style.display = 'none';
   updatePauseButtons(); // ボタンの表示を更新
 };
 const showShooting = () => {
@@ -812,6 +832,9 @@ const showShooting = () => {
   state.mode='shoot';
   answerInput.classList.remove('bottom-input');
   document.body.classList.remove('veg-mode');
+  // デバッグボタンを表示（Shooting Game専用）
+  if (debugKillEnemyBtn) debugKillEnemyBtn.style.display = '';
+  if (debugSpawnEnemyBtn) debugSpawnEnemyBtn.style.display = '';
 };
 const showVegetable = () => {
   home.classList.add('hidden');
@@ -823,6 +846,9 @@ const showVegetable = () => {
   state.mode='veg';
   answerInput.classList.add('bottom-input');
   document.body.classList.add('veg-mode');
+  // デバッグボタンを非表示（Vegetable Cutting Raceでは不要）
+  if (debugKillEnemyBtn) debugKillEnemyBtn.style.display = 'none';
+  if (debugSpawnEnemyBtn) debugSpawnEnemyBtn.style.display = 'none';
 };
 const showPizza = () => {
   home.classList.add('hidden');
@@ -832,6 +858,9 @@ const showPizza = () => {
   const ctr = document.querySelector('.controls'); if (ctr) ctr.classList.remove('hidden');
   state.mode='pizza';
   answerInput.classList.add('bottom-input');
+  // デバッグボタンを非表示（Pizza Gameでは不要）
+  if (debugKillEnemyBtn) debugKillEnemyBtn.style.display = 'none';
+  if (debugSpawnEnemyBtn) debugSpawnEnemyBtn.style.display = 'none';
   startPizza();
   answerInput.value='';
   answerInput.focus();
@@ -901,16 +930,45 @@ const renderCurrentVegCard = () => {
   vegCarrot.src = `public/${imgName}`;
   vegCarrot.classList.remove('hidden');
 };
+const updateVegPause = () => {
+  if (state.paused && state.mode === 'veg' && state.veg.started) {
+    vegPause.classList.remove('hidden');
+    // タイマーを一時停止（残り時間を保存）
+    if (state.veg.timerId) {
+      clearInterval(state.veg.timerId);
+      state.veg.timerId = null;
+      // 残り時間を計算して保存
+      const elapsed = now() - state.veg.startTime;
+      state.veg.timeLimitMs = Math.max(0, state.veg.timeLimitMs - elapsed);
+    }
+  } else {
+    vegPause.classList.add('hidden');
+    // ポーズ解除時、タイマーを再開
+    if (state.mode === 'veg' && state.veg.started && !state.veg.timerId && state.veg.timeLimitMs > 0) {
+      const start = now();
+      state.veg.startTime = start;
+      state.veg.timerId = setInterval(() => {
+        const rem = Math.max(0, state.veg.timeLimitMs - (now()-start));
+        vegTimerEl.textContent = (rem/1000).toFixed(1);
+        if (rem<=0) { clearInterval(state.veg.timerId); state.veg.timerId = null; finishVegRound(); }
+      }, 100);
+    }
+  }
+};
+
 const startVegRound = () => {
   state.veg.started = true;
+  state.paused = false; // ラウンド開始時にポーズを解除
+  updateVegPause();
   renderCurrentVegCard();
   const start = now(); state.veg.startTime = start;
   if (state.veg.timerId) clearInterval(state.veg.timerId);
   vegTimerEl.textContent = (state.veg.timeLimitMs/1000).toFixed(1);
   state.veg.timerId = setInterval(() => {
+    if (state.paused) return; // ポーズ中はタイマーを更新しない
     const rem = Math.max(0, state.veg.timeLimitMs - (now()-start));
     vegTimerEl.textContent = (rem/1000).toFixed(1);
-    if (rem<=0) { clearInterval(state.veg.timerId); finishVegRound(); }
+    if (rem<=0) { clearInterval(state.veg.timerId); state.veg.timerId = null; finishVegRound(); }
   }, 100);
   answerInput.value = '';
   answerInput.focus();
@@ -919,6 +977,12 @@ const startVegRound = () => {
 const startVegCountdown = () => {
   home.classList.add('hidden');
   vegCountdown.classList.remove('hidden');
+  // カウントダウン中はボタンを非表示
+  const controls = document.querySelector('.controls');
+  const vegControls = document.querySelector('.veg-controls');
+  if (controls) controls.style.display = 'none';
+  if (vegControls) vegControls.style.display = 'none';
+  
   let count = 3;
   vegCountdownNumber.textContent = count;
   
@@ -931,17 +995,54 @@ const startVegCountdown = () => {
     } else {
       clearInterval(countdownInterval);
       vegCountdown.classList.add('hidden');
+      // カウントダウン終了後、ボタンを再表示
+      if (controls) controls.style.display = '';
+      if (vegControls) vegControls.style.display = '';
       startVegRound();
     }
   }, 1000);
 };
 
-vegStartBtn.onclick = () => { startVegCountdown(); };
 vegBackBtn.onclick = () => initHome();
+vegNextSetBtn.onclick = () => proceedToNextSet();
+vegRetryBtn.onclick = () => retryVegRound();
+closeVegResultBtn.onclick = () => { 
+  vegResult.classList.add('hidden');
+  // テキストボックスのz-indexを元に戻す
+  if (answerInput && answerInput.classList.contains('bottom-input')) {
+    answerInput.style.zIndex = '';
+  }
+};
+vegPassBtn.onclick = () => {
+  if (!state.veg.started || state.paused) return;
+  const i = state.veg.currentIndex;
+  const w = state.veg.activeWords[i];
+  if (!w) return;
+  
+  // 答えを表示
+  vegPassAnswer.textContent = w.target;
+  vegPassOverlay.classList.remove('hidden');
+  veg.classList.add('pass-mode');
+  
+  // 3秒後に非表示に戻す
+  setTimeout(() => {
+    vegPassOverlay.classList.add('hidden');
+    veg.classList.remove('pass-mode');
+    
+    // 次の単語に進む（パスした単語はスキップ）
+    let next = i + 1;
+    while (next < state.veg.activeWords.length && state.veg.activeWords[next].cut) next++;
+    state.veg.currentIndex = next;
+    if (state.veg.currentIndex >= state.veg.activeWords.length) {
+      finishVegRound();
+    } else {
+      renderCurrentVegCard();
+    }
+  }, 3000);
+};
 chooseShooting.onclick = () => { showShooting(); summary.classList.add('hidden'); startLevel(); };
 chooseVegetable.onclick = () => { showVegetable(); setupVegSets(); resetVegRound(); startVegCountdown(); };
 choosePizza.onclick = () => { showPizza(); };
-homeBtn.onclick = () => initHome();
 const tryCutWord = (val) => {
   const i = state.veg.currentIndex;
   const w = state.veg.activeWords[i];
@@ -964,8 +1065,88 @@ const tryCutWord = (val) => {
   vegOverlayPenalty.textContent = '-50';
   vegOverlay.classList.remove('hidden');
   veg.classList.add('veg-shake');
-  setTimeout(() => { vegOverlay.classList.add('hidden'); veg.classList.remove('veg-shake'); }, 800);
+  setTimeout(() => { 
+    vegOverlay.classList.add('hidden'); 
+    veg.classList.remove('veg-shake');
+    // MISS画面が閉じた後（800ミリ秒後）に解答を3秒間表示
+    vegPassAnswer.textContent = w.target;
+    vegPassOverlay.classList.remove('hidden');
+    veg.classList.add('pass-mode');
+    // タイマーを一時停止
+    if (state.veg.timerId) {
+      clearInterval(state.veg.timerId);
+      state.veg.timerId = null;
+      const elapsed = now() - state.veg.startTime;
+      state.veg.timeLimitMs = Math.max(0, state.veg.timeLimitMs - elapsed);
+    }
+    // 3秒後に正解表示を閉じて、次の問題に進む
+    setTimeout(() => {
+      vegPassOverlay.classList.add('hidden');
+      veg.classList.remove('pass-mode');
+      // 次の問題に進む（現在の単語をスキップ）
+      let next = i + 1;
+      while (next < state.veg.activeWords.length && state.veg.activeWords[next].cut) next++;
+      state.veg.currentIndex = next;
+      if (state.veg.currentIndex >= state.veg.activeWords.length) {
+        finishVegRound();
+      } else {
+        renderCurrentVegCard();
+        // タイマーを再開
+        if (state.mode === 'veg' && state.veg.started && !state.veg.timerId && state.veg.timeLimitMs > 0) {
+          const start = now();
+          state.veg.startTime = start;
+          state.veg.timerId = setInterval(() => {
+            if (state.paused) return;
+            const rem = Math.max(0, state.veg.timeLimitMs - (now()-start));
+            vegTimerEl.textContent = (rem/1000).toFixed(1);
+            if (rem<=0) { 
+              clearInterval(state.veg.timerId); 
+              state.veg.timerId = null; 
+              finishVegRound(); 
+            }
+          }, 100);
+        }
+      }
+    }, 3000);
+  }, 800);
   return false;
+};
+const renderVegResult = () => {
+  vegResultBody.innerHTML = '';
+  const done = state.veg.activeWords.filter(x=>x.cut).length;
+  const total = state.veg.activeWords.length;
+  const accuracy = total > 0 ? Math.round((done / total) * 100) : 0;
+  
+  // スコアと統計情報を表示
+  const statsDiv = document.createElement('div');
+  statsDiv.style.marginBottom = '20px';
+  statsDiv.innerHTML = `
+    <div style="font-size: 24px; margin-bottom: 10px;"><strong>Score: ${state.score}</strong></div>
+    <div style="font-size: 18px; margin-bottom: 5px;">Correct: ${done} / ${total}</div>
+    <div style="font-size: 18px; margin-bottom: 5px;">Accuracy: ${accuracy}%</div>
+    <div style="font-size: 18px;">Round: ${state.veg.round}</div>
+  `;
+  vegResultBody.appendChild(statsDiv);
+  
+  // 単語ごとの結果を表示
+  const header = document.createElement('div');
+  header.className = 'summary-row';
+  header.innerHTML = `<strong>Word</strong><strong>Status</strong><strong>Familiarity</strong>`;
+  vegResultBody.appendChild(header);
+  
+  for (const w of state.veg.activeWords) {
+    const row = document.createElement('div');
+    row.className = 'summary-row';
+    const fam = getFam(w.id);
+    const status = w.cut ? '✓ Correct' : '✗ Missed';
+    const statusColor = w.cut ? '#10b981' : '#ef4444';
+    row.innerHTML = `
+      <div>${w.native} → ${w.target}</div>
+      <div style="color: ${statusColor};">${status}</div>
+      <div class="bar"><span style="width:${fam}%"></span></div>
+    `;
+    vegResultBody.appendChild(row);
+  }
 };
 const finishVegRound = () => {
   const done = state.veg.activeWords.filter(x=>x.cut).length;
@@ -975,16 +1156,62 @@ const finishVegRound = () => {
     const unanswered = total - done;
     const penalty = unanswered * 50;
     state.score = Math.max(0, state.score - penalty);
-    vegOverlayTitle.textContent = 'Time Out';
+    vegOverlayTitle.textContent = 'Game Over';
     vegOverlayPenalty.textContent = `-${penalty}`;
     vegOverlay.classList.remove('hidden');
     veg.classList.add('veg-shake');
-    setTimeout(() => { vegOverlay.classList.add('hidden'); veg.classList.remove('veg-shake'); }, 800);
+    setTimeout(() => { 
+      vegOverlay.classList.add('hidden'); 
+      veg.classList.remove('veg-shake');
+      // フィードバック表示後にリザルト画面を表示
+      showVegResult();
+    }, 800);
+  } else {
+    // 全て正解した場合は褒めるメッセージと薄緑色の背景を表示
+    const praiseMessages = ['Perfect!', 'Excellent!', 'Great Job!', 'Amazing!', 'Fantastic!'];
+    const randomPraise = praiseMessages[Math.floor(Math.random() * praiseMessages.length)];
+    vegOverlayTitle.textContent = randomPraise;
+    vegOverlayPenalty.textContent = '';
+    vegOverlay.classList.remove('hidden');
+    veg.classList.add('veg-success');
+    setTimeout(() => { 
+      vegOverlay.classList.add('hidden'); 
+      veg.classList.remove('veg-success');
+      // フィードバック表示後にリザルト画面を表示
+      showVegResult();
+    }, 2000);
   }
+};
+
+const showVegResult = () => {
+  // ミスした単語の処理
   for (const w of state.veg.activeWords) {
-    if (!w.cut) { state.missCounts[w.id] = (state.missCounts[w.id]||0)+1; saveMisses(state.missCounts); setFam(w.id, getFam(w.id)-10); state.veg.missDifficulty[w.id] = state.veg.difficulty; }
+    if (!w.cut) { 
+      state.missCounts[w.id] = (state.missCounts[w.id]||0)+1; 
+      saveMisses(state.missCounts); 
+      setFam(w.id, getFam(w.id)-10); 
+      state.veg.missDifficulty[w.id] = state.veg.difficulty; 
+    }
   }
-  // mark current set words as used and advance to next set each round
+  
+  // タイマーを停止
+  if (state.veg.timerId) { 
+    clearInterval(state.veg.timerId); 
+    state.veg.timerId = null; 
+  }
+  
+  // リザルト画面を表示
+  renderVegResult();
+  vegResult.classList.remove('hidden');
+  home.classList.add('hidden');
+  // テキストボックスのz-indexを下げる
+  if (answerInput) {
+    answerInput.style.zIndex = '10';
+  }
+};
+
+const proceedToNextSet = () => {
+  // mark current set words as used and advance to next set
   for (const w of state.veg.currentSetWords) state.veg.usedWordIds[w.id] = true;
   state.veg.setIndex++;
   state.veg.round++;
@@ -997,12 +1224,24 @@ const finishVegRound = () => {
       }
     }
   }
-  if (state.veg.timerId) { clearInterval(state.veg.timerId); state.veg.timerId = null; }
   resetVegRound();
-  // 次のラウンドもカウントダウンを表示
-  setTimeout(() => {
-    startVegCountdown();
-  }, 1000); // フィードバック表示後にカウントダウン開始
+  vegResult.classList.add('hidden');
+  // テキストボックスのz-indexを元に戻す
+  if (answerInput && answerInput.classList.contains('bottom-input')) {
+    answerInput.style.zIndex = '';
+  }
+  startVegCountdown();
+};
+
+const retryVegRound = () => {
+  // スコアをリセットしない（現在のスコアを維持）
+  resetVegRound();
+  vegResult.classList.add('hidden');
+  // テキストボックスのz-indexを元に戻す
+  if (answerInput && answerInput.classList.contains('bottom-input')) {
+    answerInput.style.zIndex = '';
+  }
+  startVegCountdown();
 };
 
 flashBody.addEventListener('click', (ev) => {
@@ -1047,7 +1286,9 @@ answerInput.addEventListener('keydown', (e) => {
     if (!state.running || state.paused) return;
     checkAnswer(val, false);
   } else if (state.mode==='veg') {
-    if (!state.veg.timerId || !state.veg.started) return;
+    // 正解表示中（vegPassOverlayが表示されている間）は入力を無視
+    if (!vegPassOverlay.classList.contains('hidden')) return;
+    if (!state.veg.timerId || !state.veg.started || state.paused) return;
     tryCutWord(val);
   } else if (state.mode==='pizza') {
     const l = state.pizza.leftWord, r = state.pizza.rightWord;
@@ -1115,14 +1356,22 @@ const updatePauseButtons = () => {
 };
 
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && state.mode === 'shoot') {
-    state.paused = !state.paused;
-    updatePauseButtons();
+  if (e.key === 'Escape') {
+    if (state.mode === 'shoot') {
+      state.paused = !state.paused;
+      updatePauseButtons();
+    } else if (state.mode === 'veg' && state.veg.started) {
+      state.paused = !state.paused;
+      updateVegPause();
+    }
   }
 });
 
 initHome();
 updatePauseButtons(); // 初期状態でボタンを非表示にする
+// 初期状態でデバッグボタンを非表示
+if (debugKillEnemyBtn) debugKillEnemyBtn.style.display = 'none';
+if (debugSpawnEnemyBtn) debugSpawnEnemyBtn.style.display = 'none';
 draw();
 const debug = (...a) => { try { console.log('[DEBUG]', ...a); } catch {} };
 const pickTwoWords = () => {

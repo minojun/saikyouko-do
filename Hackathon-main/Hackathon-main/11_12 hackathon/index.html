@@ -34,7 +34,6 @@
     <button id="voiceBtn">Voice: Off</button>
     <button id="summaryToggleBtn">Summary</button>
     <button id="flashBtn">Flashcards</button>
-    <button id="homeBtn">Home</button>
     <button id="debugKillEnemyBtn" style="background: #ef4444; color: white; font-weight: bold;">[DEBUG] Kill Enemy</button>
     <button id="debugSpawnEnemyBtn" style="background: #f59e0b; color: white; font-weight: bold;">[DEBUG] Spawn Enemy</button>
   </div>
@@ -76,10 +75,29 @@
       <div id="vegCountdownNumber" style="font-size: 120px; color: #e6edf3; font-weight: bold;">3</div>
     </div>
   </div>
+  <div id="vegPause" class="veg-overlay hidden">
+    <div class="veg-overlay-content">
+      <div style="font-size: 96px; color: #e6edf3; font-weight: bold;">PAUSED</div>
+    </div>
+  </div>
+  <div id="vegPassOverlay" class="veg-overlay hidden">
+    <div class="veg-overlay-content">
+      <div id="vegPassAnswer" style="font-size: 72px; color: #e6edf3; font-weight: bold;"></div>
+    </div>
+  </div>
   <img id="vegCarrot" class="veg-carrot hidden" alt="carrot" src="public/carrotnoword.PNG" />
   <div class="veg-controls">
-    <button id="vegStart">START</button>
     <button id="vegBack">Back to Home</button>
+    <button id="vegPass">Pass</button>
+  </div>
+  <div id="vegResult" class="hidden">
+    <div class="summary-card">
+      <button id="closeVegResultBtn" class="close-btn" style="position: absolute; top: 10px; right: 10px; background: #ef4444; color: white; border: none; border-radius: 50%; width: 30px; height: 30px; font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; line-height: 1;">×</button>
+      <h2>Round Result</h2>
+      <div id="vegResultBody"></div>
+      <button id="vegNextSetBtn">Next Set</button>
+      <button id="vegRetryBtn">Retry</button>
+    </div>
   </div>
 </div>
 <script src="game.js"></script>

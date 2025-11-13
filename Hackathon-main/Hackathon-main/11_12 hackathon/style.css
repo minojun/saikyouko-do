@@ -226,7 +226,16 @@ button:active { filter: brightness(0.9); }
 }
 .veg-hud { display:flex; gap: 14px; background: rgba(0,0,0,0.3); padding: 10px 14px; border-radius: 10px; }
 .veg-hide { display: none; }
-.veg-board { display:grid; grid-template-columns: repeat(5, 1fr); gap: 12px; align-content: start; }
+.veg-board { 
+  position: fixed;
+  left: 50%;
+  top: calc(50% - 180px);
+  transform: translateX(-50%);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 21;
+}
 .veg-card { border:1px solid #1e293b; border-radius:10px; background:#0f172a; padding: 14px; text-align:center; position: relative; }
 .veg-card.cut { transform: scale(0.96); filter: saturate(1.2); }
 .veg-cut { position:absolute; inset:0; display:grid; place-items:center; font-size:28px; opacity:0; animation: pop .3s ease forwards; }
@@ -251,11 +260,40 @@ button:active { filter: brightness(0.9); }
   background: rgba(255,0,0,0.22);
   z-index: 26;
 }
+#veg.veg-success .veg-overlay {
+  background: rgba(34,197,94,0.3) !important; /* 薄緑色の背景 */
+}
 #vegCountdown {
   background: rgba(100,100,100,0.5) !important;
+  z-index: 35 !important; /* ボタンより前面に表示 */
+}
+#vegPause {
+  background: rgba(0,0,0,0.5) !important;
+  z-index: 35 !important; /* ボタンより前面に表示 */
+}
+#vegPassOverlay {
+  background: rgba(200,0,0,0.3) !important;
+  z-index: 35 !important; /* ボタンより前面に表示 */
+}
+#vegResult {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  z-index: 40 !important; /* 最前面に表示 */
+  background: rgba(0,0,0,0.7);
+}
+#veg.pass-mode {
+  background-color: rgba(200,0,0,0.2);
+}
+#veg.veg-success {
+  background-color: rgba(34,197,94,0.15) !important; /* 薄緑色の背景 */
 }
 .veg-overlay-content { text-align:center; }
 .veg-overlay-content #vegOverlayTitle { font-size: 64px; color: #ef4444; }
+#veg.veg-success .veg-overlay-content #vegOverlayTitle {
+  color: #22c55e !important; /* 緑色のテキスト */
+}
 .veg-overlay-content #vegOverlayPenalty { font-size: 40px; color: #ef4444; }
 @keyframes vegshake { 0%{ transform: translate(0,0);} 20%{ transform: translate(12px,-8px);} 40%{ transform: translate(-10px,6px);} 60%{ transform: translate(8px,-6px);} 80%{ transform: translate(-6px,4px);} 100%{ transform: translate(0,0);} }
 #veg.veg-shake { animation: vegshake 0.7s ease; }
@@ -278,12 +316,11 @@ button:active { filter: brightness(0.9); }
   background: url('public/vegibackground.png') center/cover no-repeat;
 }
 .veg-hud { display:flex; gap: 14px; background: rgba(0,0,0,0.3); padding: 10px 14px; border-radius: 10px; }
-/* Bottom layout for vegetable mode */
+/* Top layout for vegetable mode */
 body.veg-mode .controls {
   position: fixed;
-  bottom: 220px;
-  left: 50%;
-  transform: translateX(-50%);
+  top: 12px;
+  right: 12px;
   z-index: 24;
 }
 body.veg-mode .veg-hud {
