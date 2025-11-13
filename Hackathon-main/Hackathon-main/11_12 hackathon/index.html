@@ -36,6 +36,7 @@
     <button id="flashBtn">Flashcards</button>
     <button id="homeBtn">Home</button>
     <button id="debugKillEnemyBtn" style="background: #ef4444; color: white; font-weight: bold;">[DEBUG] Kill Enemy</button>
+    <button id="debugSpawnEnemyBtn" style="background: #f59e0b; color: white; font-weight: bold;">[DEBUG] Spawn Enemy</button>
   </div>
   <input id="answerInput" type="text" placeholder="Type English translation here" autocomplete="off" />
 </div>
@@ -68,6 +69,11 @@
     <div class="veg-overlay-content">
       <div id="vegOverlayTitle">Missed</div>
       <div id="vegOverlayPenalty">-50</div>
+    </div>
+  </div>
+  <div id="vegCountdown" class="veg-overlay hidden">
+    <div class="veg-overlay-content">
+      <div id="vegCountdownNumber" style="font-size: 120px; color: #e6edf3; font-weight: bold;">3</div>
     </div>
   </div>
   <img id="vegCarrot" class="veg-carrot hidden" alt="carrot" src="public/carrotnoword.PNG" />

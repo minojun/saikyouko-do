@@ -22,6 +22,7 @@ const homeBtn = document.getElementById('homeBtn');
 const closeSummaryBtn = document.getElementById('closeSummaryBtn');
 const closeFlashcardsBtn = document.getElementById('closeFlashcardsBtn');
 const debugKillEnemyBtn = document.getElementById('debugKillEnemyBtn');
+const debugSpawnEnemyBtn = document.getElementById('debugSpawnEnemyBtn');
 const choosePizza = document.getElementById('choosePizza');
 const home = document.getElementById('home');
 const chooseShooting = document.getElementById('chooseShooting');
@@ -32,6 +33,8 @@ const vegCarrot = document.getElementById('vegCarrot');
 const vegOverlay = document.getElementById('vegOverlay');
 const vegOverlayTitle = document.getElementById('vegOverlayTitle');
 const vegOverlayPenalty = document.getElementById('vegOverlayPenalty');
+const vegCountdown = document.getElementById('vegCountdown');
+const vegCountdownNumber = document.getElementById('vegCountdownNumber');
 const vegStartBtn = document.getElementById('vegStart');
 const vegBackBtn = document.getElementById('vegBack');
 const vegNameEl = document.getElementById('vegName');
@@ -136,6 +139,7 @@ const state = {
   currentWord: null,
   spawnTimer: 0,
   lastSpawnedWordId: null,
+  usedWordIdsInLevel: [], // 現在のレベルで使用済みの単語ID
   enemiesKilled: 0,
   spawnInterval: 4000, // 出現間隔（ミリ秒）、初期値は4秒
   usingVoice: false,
@@ -144,6 +148,9 @@ const state = {
   lastPenalty: 0,
   effects: [],
   summaryReady: false,
+  showAnswerUntil: 0, // 解答表示の終了時刻
+  answerToShow: null, // 表示する解答
+  gamePausedForAnswer: false, // 解答表示のためにゲームが一時停止しているか
   flash: { view: 'categories', category: null, items: [], idx: 0, flipped: false, choices: [], correctIndex: -1 },
   mode: 'home',
   bg: { shooting: null, pizza: null },
@@ -234,18 +241,32 @@ const player = { x: 80, y: canvas.height/2 };
 
 const spawnEnemy = () => {
   const lvl = levels[state.levelIndex];
-  let pool = lvl.words.slice();
+  // 使用済みでない単語のみをプールに含める
+  let pool = lvl.words.filter(w => !state.usedWordIdsInLevel.includes(w.id));
+  
+  // 使用可能な単語がなくなったら、画面に敵が残っているか確認
+  if (pool.length === 0) {
+    // 画面に敵が残っている場合は、次のレベルに進まない
+    if (state.enemies.length > 0) {
+      return;
+    }
+    // 敵が全て消えた後、使用可能な単語がなければ次のレベルに遷移
+    advanceToNextLevel();
+    return;
+  }
+  
   // 前回出現した単語を除外（同じ単語が連続しないように）
   if (state.lastSpawnedWordId !== null) {
     pool = pool.filter(w => w.id !== state.lastSpawnedWordId);
   }
-  // 除外後にプールが空になった場合は全単語から選ぶ
+  // 除外後にプールが空になった場合は、使用済みでない単語から選ぶ
   if (pool.length === 0) {
-    pool = lvl.words.slice();
+    pool = lvl.words.filter(w => !state.usedWordIdsInLevel.includes(w.id));
   }
   pool.sort((a,b)=>getFam(a.id)-getFam(b.id));
   const w = pool[Math.floor(rand()*Math.min(3,pool.length))];
   state.lastSpawnedWordId = w.id; // 今回出現した単語を記録
+  state.usedWordIdsInLevel.push(w.id); // 使用済みリストに追加
   const ch = pickChallenge(w);
   const e = {
     id: w.id,
@@ -362,6 +383,10 @@ const updateBullets = () => {
 };
 
 const updateEnemies = () => {
+  // 解答表示中は敵の移動を停止
+  if (state.gamePausedForAnswer) {
+    return;
+  }
   for (const e of state.enemies) e.x -= e.speed;
   const survive = [];
   for (const e of state.enemies) {
@@ -407,6 +432,11 @@ const failEnemy = (e) => {
   state.missCounts[e.id] = (state.missCounts[e.id]||0) + 1;
   saveMisses(state.missCounts);
   state.enemies = state.enemies.filter(x=>x!==e);
+  // 到達した単語を再度出現可能にする（レベルが上がる前に再出現させるため）
+  const index = state.usedWordIdsInLevel.indexOf(e.id);
+  if (index > -1) {
+    state.usedWordIdsInLevel.splice(index, 1);
+  }
   updateCurrentWord();
   // 次の敵は現在の出現間隔後にスポーン（既存のタイマーより遅い場合は更新しない）
   if (now() + state.spawnInterval > state.spawnTimer) {
@@ -415,6 +445,18 @@ const failEnemy = (e) => {
   state.missFeedbackUntil = now() + 800;
   state.shakeUntil = now() + 700;
   state.lastPenalty = 50;
+  // MISS画面が閉じた後（800ミリ秒後）に解答を3秒間表示
+  const answerStartTime = now() + 800;
+  setTimeout(() => {
+    state.gamePausedForAnswer = true;
+    state.answerToShow = e.target; // 正解の単語を表示
+    state.showAnswerUntil = answerStartTime + 3000; // 3秒間表示
+    // 3秒後にゲームを再開
+    setTimeout(() => {
+      state.gamePausedForAnswer = false;
+      state.answerToShow = null;
+    }, 3000);
+  }, 800);
   debug('FAIL id=', e.id, 'score=', state.score, 'health=', state.health);
 };
 
@@ -475,11 +517,22 @@ const draw = () => {
     ctx.fillText(text, (canvas.width - tw)/2, canvas.height/2);
     ctx.restore();
   }
+  if (state.answerToShow && t < state.showAnswerUntil) {
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+    ctx.fillStyle = '#e6edf3';
+    ctx.font = 'bold 72px system-ui';
+    const answerText = state.answerToShow;
+    const aw = ctx.measureText(answerText).width;
+    ctx.fillText(answerText, (canvas.width - aw)/2, canvas.height/2);
+    ctx.restore();
+  }
 };
 
 const tick = () => {
   if (!state.running) return;
-  if (!state.paused) {
+  if (!state.paused && !state.gamePausedForAnswer) {
     updateEnemies();
     updateBullets();
     updateCurrentWord();
@@ -488,6 +541,15 @@ const tick = () => {
     if (state.enemies.length < maxEnemies && now() > state.spawnTimer) {
       spawnEnemy();
       state.spawnTimer = now() + state.spawnInterval; // 現在の出現間隔を使用
+    }
+    // 敵が全て消え、使用可能な単語もない場合、次のレベルに進む
+    if (state.enemies.length === 0) {
+      const lvl = levels[state.levelIndex];
+      const pool = lvl.words.filter(w => !state.usedWordIdsInLevel.includes(w.id));
+      if (pool.length === 0) {
+        advanceToNextLevel();
+        return;
+      }
     }
   }
   draw();
@@ -499,9 +561,34 @@ const tick = () => {
   requestAnimationFrame(tick);
 };
 
+const advanceToNextLevel = () => {
+  // ゲームを一時停止
+  state.running = false;
+  state.paused = false;
+  
+  // 画面に残っている敵をクリア
+  state.enemies = [];
+  state.bullets = [];
+  state.currentWord = null;
+  
+  // 現在のレベルのサマリーを表示
+  const lvl = levels[state.levelIndex];
+  renderSummary(lvl);
+  state.summaryReady = true;
+  summary.classList.remove('hidden');
+  summaryToggleBtn.textContent = 'Summary (ready)';
+  
+  // 使用済み単語リストをリセット（次のレベル用）
+  state.usedWordIdsInLevel = [];
+  state.lastSpawnedWordId = null;
+  
+  // 自動的に次のレベルに進むのではなく、ユーザーがNext Levelボタンを押すまで待つ
+};
+
 const startLevel = () => {
   state.running = true; state.paused=false; state.score = state.score; state.health = 100; state.streak=0; state.multiplier=1; state.superModeUntil=0; state.enemies=[]; state.stats={};
   state.lastSpawnedWordId = null; // 前回出現した単語をリセット
+  state.usedWordIdsInLevel = []; // 使用済み単語リストをリセット
   state.enemiesKilled = 0; // 敵を倒した数をリセット
   state.spawnInterval = 4000; // 出現間隔を4秒にリセット
   updateSpawnRate(); // 出現頻度表示を更新
@@ -690,6 +777,16 @@ debugKillEnemyBtn.onclick = () => {
     }
   }
 };
+debugSpawnEnemyBtn.onclick = () => {
+  if (state.mode === 'shoot' && state.running && !state.paused) {
+    const maxEnemies = 3;
+    // 敵が最大数未満の場合のみ出現させる
+    if (state.enemies.length < maxEnemies) {
+      spawnEnemy();
+      state.spawnTimer = now() + state.spawnInterval; // 次の敵のタイマーも更新
+    }
+  }
+};
 
 const initHome = () => {
   home.classList.remove('hidden');
@@ -818,10 +915,31 @@ const startVegRound = () => {
   answerInput.value = '';
   answerInput.focus();
 };
-vegStartBtn.onclick = () => { home.classList.add('hidden'); startVegRound(); };
+
+const startVegCountdown = () => {
+  home.classList.add('hidden');
+  vegCountdown.classList.remove('hidden');
+  let count = 3;
+  vegCountdownNumber.textContent = count;
+  
+  const countdownInterval = setInterval(() => {
+    count--;
+    if (count > 0) {
+      vegCountdownNumber.textContent = count;
+    } else if (count === 0) {
+      vegCountdownNumber.textContent = 'GO!';
+    } else {
+      clearInterval(countdownInterval);
+      vegCountdown.classList.add('hidden');
+      startVegRound();
+    }
+  }, 1000);
+};
+
+vegStartBtn.onclick = () => { startVegCountdown(); };
 vegBackBtn.onclick = () => initHome();
 chooseShooting.onclick = () => { showShooting(); summary.classList.add('hidden'); startLevel(); };
-chooseVegetable.onclick = () => { showVegetable(); setupVegSets(); resetVegRound(); answerInput.focus(); };
+chooseVegetable.onclick = () => { showVegetable(); setupVegSets(); resetVegRound(); startVegCountdown(); };
 choosePizza.onclick = () => { showPizza(); };
 homeBtn.onclick = () => initHome();
 const tryCutWord = (val) => {
@@ -881,7 +999,10 @@ const finishVegRound = () => {
   }
   if (state.veg.timerId) { clearInterval(state.veg.timerId); state.veg.timerId = null; }
   resetVegRound();
-  startVegRound();
+  // 次のラウンドもカウントダウンを表示
+  setTimeout(() => {
+    startVegCountdown();
+  }, 1000); // フィードバック表示後にカウントダウン開始
 };
 
 flashBody.addEventListener('click', (ev) => {

@@ -251,6 +251,9 @@ button:active { filter: brightness(0.9); }
   background: rgba(255,0,0,0.22);
   z-index: 26;
 }
+#vegCountdown {
+  background: rgba(100,100,100,0.5) !important;
+}
 .veg-overlay-content { text-align:center; }
 .veg-overlay-content #vegOverlayTitle { font-size: 64px; color: #ef4444; }
 .veg-overlay-content #vegOverlayPenalty { font-size: 40px; color: #ef4444; }
