@@ -34,6 +34,7 @@
     <button id="voiceBtn">Voice: Off</button>
     <button id="summaryToggleBtn">Summary</button>
     <button id="flashBtn">Flashcards</button>
+    <button id="homeBtn">Home</button>
     <button id="debugKillEnemyBtn" style="background: #ef4444; color: white; font-weight: bold;">[DEBUG] Kill Enemy</button>
     <button id="debugSpawnEnemyBtn" style="background: #f59e0b; color: white; font-weight: bold;">[DEBUG] Spawn Enemy</button>
   </div>
@@ -56,6 +57,30 @@
     <div id="flashBody"></div>
   </div>
   </div>
+<button id="helpBtn" style="position: fixed; top: 56px; right: 12px; z-index: 15; background: #3b82f6; color: white; border: none; border-radius: 50%; width: 40px; height: 40px; font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 8px rgba(0,0,0,0.3);">?</button>
+<div id="help" class="hidden" style="position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 24; display: flex; align-items: center; justify-content: center;">
+  <div class="summary-card" style="max-width: 600px; max-height: 80vh; overflow-y: auto; position: relative;">
+    <button id="closeHelpBtn" class="close-btn" style="position: absolute; top: 10px; right: 10px; background: #ef4444; color: white; border: none; border-radius: 50%; width: 30px; height: 30px; font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; line-height: 1;">×</button>
+    <h2>遊び方</h2>
+    <div id="helpBody" style="line-height: 1.8;">
+      <h3>Shooting Game</h3>
+      <p>画面上部から敵が降りてきます。日本語の単語が表示されるので、対応する英語を入力してください。正解すると敵を倒せます。</p>
+      
+      <h3>Vegetable Cutting Race</h3>
+      <p>制限時間内に日本語の単語に対応する英語を入力して野菜を切ります。全て正解すると次のセットに進めます。</p>
+      
+      <h3>Pizza & Mold Dash</h3>
+      <p>画面上部からピザ🍕とカビ🦠が落ちてきます。左・真ん中・右の3つの選択肢から、表示されている日本語に対応する英語を入力してプレイヤーを移動させます。</p>
+      <ul>
+        <li>ピザを拾うと+100ポイント</li>
+        <li>カビを拾うと-50ポイント</li>
+        <li>ピザを落とすと-50ポイント</li>
+        <li>スペースキーでオブジェクトを即座に落とせます</li>
+        <li>ミスした時は答えが表示されます</li>
+      </ul>
+    </div>
+  </div>
+</div>
 <div id="veg" class="hidden">
   <div class="veg-hud">
     <div class="veg-hide">Vegetable: <span id="vegName">—</span></div>

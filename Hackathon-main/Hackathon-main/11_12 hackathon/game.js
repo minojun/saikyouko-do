@@ -11,6 +11,7 @@ const pauseBtn = document.getElementById('pauseBtn');
 const voiceBtn = document.getElementById('voiceBtn');
 const summaryToggleBtn = document.getElementById('summaryToggleBtn');
 const flashBtn = document.getElementById('flashBtn');
+const homeBtn = document.getElementById('homeBtn');
 const answerInput = document.getElementById('answerInput');
 const summary = document.getElementById('summary');
 const summaryBody = document.getElementById('summaryBody');
@@ -20,6 +21,9 @@ const nextLevelBtn = document.getElementById('nextLevelBtn');
 const restartBtn = document.getElementById('restartBtn');
 const closeSummaryBtn = document.getElementById('closeSummaryBtn');
 const closeFlashcardsBtn = document.getElementById('closeFlashcardsBtn');
+const helpBtn = document.getElementById('helpBtn');
+const help = document.getElementById('help');
+const closeHelpBtn = document.getElementById('closeHelpBtn');
 const debugKillEnemyBtn = document.getElementById('debugKillEnemyBtn');
 const debugSpawnEnemyBtn = document.getElementById('debugSpawnEnemyBtn');
 const choosePizza = document.getElementById('choosePizza');
@@ -160,6 +164,7 @@ const state = {
   gamePausedForAnswer: false, // 解答表示のためにゲームが一時停止しているか
   flash: { view: 'categories', category: null, items: [], idx: 0, flipped: false, choices: [], correctIndex: -1 },
   mode: 'home',
+  boss: null, // ボス情報 { id: 'boss', native: 'トマト', target: 'tomato', hp: 3, maxHp: 3, x, y, speed, born, dead }
   bg: { shooting: null, pizza: null },
   veg: {
     sets: [],
@@ -182,8 +187,10 @@ const state = {
     running: false,
     timeLimitMs: 60000,
     startTime: 0,
+    pausedTime: 0, // ポーズ開始時刻
     item: null,
     leftWord: null,
+    centerWord: null,
     rightWord: null,
     playerSide: 'center',
     feedbackUntil: 0,
@@ -193,6 +200,9 @@ const state = {
     successUntil: 0,
     successTitle: '',
     successBonus: 0,
+    lastItemType: null, // 前回のアイテムタイプ（カビ連続防止用）
+    missedAnswers: null, // ミスした時の3つの単語の答え（再抽選前に表示用）
+    pausedForMiss: false, // ミス画面で一時停止中かどうか
   },
 };
 state.bg.shooting = new Image(); state.bg.shooting.src = 'public/shootingbackground.png';
@@ -246,6 +256,28 @@ const SFX = (() => {
 
 const player = { x: 80, y: canvas.height/2 };
 
+const spawnBoss = () => {
+  // ステージ1（果物レベル）のみボスを出現
+  if (state.levelIndex !== 0 || state.boss) return;
+  
+  state.boss = {
+    id: 'boss',
+    native: 'トマト',
+    target: 'tomato',
+    display: 'トマト',
+    expect: 'tomato',
+    mode: 'nativeOnly',
+    hp: 3,
+    maxHp: 3,
+    x: canvas.width - 40,
+    y: canvas.height / 2,
+    speed: 0.3,
+    born: now(),
+    dead: false
+  };
+  debug('BOSS SPAWNED');
+};
+
 const spawnEnemy = () => {
   const lvl = levels[state.levelIndex];
   // 使用済みでない単語のみをプールに含める
@@ -255,6 +287,11 @@ const spawnEnemy = () => {
   if (pool.length === 0) {
     // 画面に敵が残っている場合は、次のレベルに進まない
     if (state.enemies.length > 0) {
+      return;
+    }
+    // ステージ1の場合、ボスを出現させる
+    if (state.levelIndex === 0 && !state.boss) {
+      spawnBoss();
       return;
     }
     // 敵が全て消えた後、使用可能な単語がなければ次のレベルに遷移
@@ -348,6 +385,29 @@ const drawEnemy = (e) => {
   ctx.fillStyle = '#22c55e'; ctx.fillRect(e.x + Math.max(tw,boxW)/2 + 6, e.y - sizeEmoji + (sizeEmoji+24)*(1-fam/100), 8, (sizeEmoji+24)*(fam/100));
 };
 
+const drawBoss = () => {
+  if (!state.boss || state.boss.dead) return;
+  const b = state.boss;
+  const sizeEmoji = 48; const sizeText = 24;
+  ctx.font = `${sizeEmoji}px system-ui`;
+  const emoji = '🍅';
+  const tw = ctx.measureText(emoji).width;
+  ctx.fillText(emoji, b.x - tw/2, b.y + sizeEmoji/3);
+  ctx.font = `bold ${sizeText}px Monospace`;
+  const textW = ctx.measureText(b.display).width;
+  const pad = 12; const boxW = textW + pad*2; const boxH = 32; const boxX = b.x - boxW/2; const boxY = b.y + sizeEmoji - 28;
+  ctx.fillStyle = 'rgba(220,38,38,0.9)'; ctx.strokeStyle = '#ef4444'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.rect(boxX, boxY, boxW, boxH); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#ffffff'; ctx.fillText(b.display, b.x - textW/2, boxY + 22);
+  // HPバーを表示
+  const hpBarW = 120; const hpBarH = 12;
+  const hpBarX = b.x - hpBarW/2; const hpBarY = b.y - sizeEmoji - 20;
+  ctx.fillStyle = '#1e293b'; ctx.fillRect(hpBarX, hpBarY, hpBarW, hpBarH);
+  ctx.fillStyle = '#ef4444'; ctx.fillRect(hpBarX, hpBarY, hpBarW * (b.hp / b.maxHp), hpBarH);
+  ctx.fillStyle = '#ffffff'; ctx.font = 'bold 14px Monospace';
+  ctx.fillText(`HP: ${b.hp}/${b.maxHp}`, b.x - 30, hpBarY - 4);
+};
+
 const drawPlayer = () => {
   const size = 128;
   const ufo = '🛸';
@@ -372,6 +432,42 @@ const drawBullets = () => {
 const updateBullets = () => {
   for (const b of state.bullets) {
     if (b.speed) {
+      // ボスへの攻撃をチェック
+      if (state.boss && !state.boss.dead && b.targetId === 'boss') {
+        const dx = state.boss.x - b.x;
+        const dy = state.boss.y - b.y;
+        const d = Math.hypot(dx, dy);
+        if (d <= 30) {
+          // ボスにダメージ
+          state.boss.hp--;
+          explodeAt(state.boss.x, state.boss.y);
+          SFX.hit();
+          if (state.boss.hp <= 0) {
+            // ボスを倒した
+            state.boss.dead = true;
+            const t = now() - state.boss.born;
+            addScore(500, t, !!b.usedVoice);
+            explodeAt(state.boss.x, state.boss.y);
+            SFX.explode();
+            // ボスの統計情報を記録
+            const bossId = 'tomato'; // ボスのID
+            const s = state.stats[bossId] || { ok:0, fail:0, times:[] };
+            s.ok++; s.times.push(t);
+            state.stats[bossId] = s;
+            setFam(bossId, getFam(bossId)+10);
+            setTimeout(() => {
+              state.boss = null;
+              advanceToNextLevel();
+            }, 1000);
+          }
+          b.done = true;
+          continue;
+        }
+        const step = Math.min(b.speed, d);
+        b.x += dx / d * step;
+        b.y += dy / d * step;
+        continue;
+      }
       const t = state.enemies.find(e=>e.id===b.targetId && !e.dead);
       if (!t) { b.done = true; continue; }
       const dx = t.x - b.x;
@@ -402,6 +498,15 @@ const updateEnemies = () => {
     } else survive.push(e);
   }
   state.enemies = survive;
+  // ボスの移動
+  if (state.boss && !state.boss.dead) {
+    state.boss.x -= state.boss.speed;
+    if (state.boss.x < 60) {
+      // ボスが画面左端に到達したら失敗
+      state.boss.dead = true;
+      state.health = 0;
+    }
+  }
 };
 
 const explodeAt = (x,y) => {
@@ -485,6 +590,7 @@ const draw = () => {
   ctx.translate(ox, oy);
   drawPlayer();
   for (const e of state.enemies) drawEnemy(e);
+  drawBoss();
   drawBullets();
   const tNow = now();
   const remain = [];
@@ -544,8 +650,9 @@ const tick = () => {
     updateBullets();
     updateCurrentWord();
     // 敵が3体以下で、一定時間経過したらスポーン（複数敵を同時に表示可能）
+    // ボスが出現している場合は通常の敵をスポーンしない
     const maxEnemies = 3;
-    if (state.enemies.length < maxEnemies && now() > state.spawnTimer) {
+    if (state.enemies.length < maxEnemies && now() > state.spawnTimer && !(state.boss && !state.boss.dead)) {
       spawnEnemy();
       state.spawnTimer = now() + state.spawnInterval; // 現在の出現間隔を使用
     }
@@ -554,8 +661,15 @@ const tick = () => {
       const lvl = levels[state.levelIndex];
       const pool = lvl.words.filter(w => !state.usedWordIdsInLevel.includes(w.id));
       if (pool.length === 0) {
-        advanceToNextLevel();
-        return;
+        // ステージ1の場合、ボスを出現させる
+        if (state.levelIndex === 0 && !state.boss) {
+          spawnBoss();
+        } else if (state.levelIndex === 0 && state.boss && !state.boss.dead) {
+          // ボスがいる場合は何もしない
+        } else {
+          advanceToNextLevel();
+          return;
+        }
       }
     }
   }
@@ -598,6 +712,7 @@ const startLevel = () => {
   state.usedWordIdsInLevel = []; // 使用済み単語リストをリセット
   state.enemiesKilled = 0; // 敵を倒した数をリセット
   state.spawnInterval = 4000; // 出現間隔を4秒にリセット
+  state.boss = null; // ボスをリセット
   updateSpawnRate(); // 出現頻度表示を更新
   levelNameEl.textContent = themes[state.levelIndex%themes.length].name;
   answerInput.value = '';
@@ -640,6 +755,23 @@ const renderSummary = (lvl) => {
     const tAvg = Math.round(avg(s.times));
     row.innerHTML = `
       <div>${w.native} → ${w.target}</div>
+      <div>${acc}%</div>
+      <div>${tAvg} ms</div>
+      <div class="bar"><span style="width:${fam}%"></span></div>
+    `;
+    summaryBody.appendChild(row);
+  }
+  // ステージ1の場合、ボス（トマト）の統計情報も表示
+  if (state.levelIndex === 0) {
+    const bossId = 'tomato';
+    const s = state.stats[bossId] || { ok:0, fail:0, times:[] };
+    const acc = (s.ok + s.fail)>0? Math.round(s.ok/(s.ok+s.fail)*100) : 0;
+    const row = document.createElement('div');
+    row.className = 'summary-row';
+    const fam = getFam(bossId);
+    const tAvg = Math.round(avg(s.times));
+    row.innerHTML = `
+      <div>トマト → tomato</div>
       <div>${acc}%</div>
       <div>${tAvg} ms</div>
       <div class="bar"><span style="width:${fam}%"></span></div>
@@ -776,14 +908,59 @@ pauseBtn.onclick = () => {
   } else if (state.mode==='veg' && state.veg.started) {
     state.paused = !state.paused;
     updateVegPause();
+  } else if (state.mode==='pizza' && state.pizza.running) {
+    state.paused = !state.paused;
+    if (state.paused) {
+      // ポーズ開始時：経過時間を記録
+      state.pizza.pausedTime = now();
+    } else {
+      // ポーズ解除時：startTimeを調整してタイマーを再開
+      const pausedDuration = now() - state.pizza.pausedTime;
+      state.pizza.startTime += pausedDuration;
+    }
   }
 };
 nextLevelBtn.onclick = () => { home.classList.add('hidden'); summary.classList.add('hidden'); state.levelIndex = (state.levelIndex+1)%levels.length; state.themeIndex = state.levelIndex; startLevel(); };
 restartBtn.onclick = () => { home.classList.add('hidden'); summary.classList.add('hidden'); if (state.mode==='shoot') startLevel(); else if (state.mode==='veg') { resetVegRound(); } };
 summaryToggleBtn.onclick = () => { home.classList.add('hidden'); if (summary.classList.contains('hidden')) { summary.classList.remove('hidden'); state.summaryReady=false; summaryToggleBtn.textContent='Summary'; } else { summary.classList.add('hidden'); } };
 flashBtn.onclick = () => { home.classList.add('hidden'); if (flashcards.classList.contains('hidden')) { renderFlashcards(); flashcards.classList.remove('hidden'); } else { flashcards.classList.add('hidden'); } };
+homeBtn.onclick = () => { initHome(); };
 closeSummaryBtn.onclick = () => { summary.classList.add('hidden'); };
 closeFlashcardsBtn.onclick = () => { flashcards.classList.add('hidden'); };
+helpBtn.onclick = () => {
+  help.classList.remove('hidden');
+  // 遊び方ウィンドウを開いている時はゲームを一時停止
+  if (state.mode === 'shoot' && state.running) {
+    state.paused = true;
+    updatePauseButtons();
+  } else if (state.mode === 'veg' && state.veg.started) {
+    state.paused = true;
+    updateVegPause();
+  } else if (state.mode === 'pizza' && state.pizza.running) {
+    state.paused = true;
+    if (!state.pizza.pausedTime) {
+      state.pizza.pausedTime = now();
+    }
+  }
+};
+closeHelpBtn.onclick = () => {
+  help.classList.add('hidden');
+  // 遊び方ウィンドウを閉じた時はゲームを再開
+  if (state.mode === 'shoot' && state.running) {
+    state.paused = false;
+    updatePauseButtons();
+  } else if (state.mode === 'veg' && state.veg.started) {
+    state.paused = false;
+    updateVegPause();
+  } else if (state.mode === 'pizza' && state.pizza.running) {
+    state.paused = false;
+    if (state.pizza.pausedTime) {
+      const pausedDuration = now() - state.pizza.pausedTime;
+      state.pizza.startTime += pausedDuration;
+      state.pizza.pausedTime = null;
+    }
+  }
+};
 debugKillEnemyBtn.onclick = () => {
   if (state.mode === 'shoot' && state.running && !state.paused && state.currentWord) {
     const enemy = state.enemies.find(e => e.id === state.currentWord.id && !e.dead);
@@ -813,6 +990,7 @@ const initHome = () => {
   if (state.veg.timerId) { clearInterval(state.veg.timerId); state.veg.timerId=null; }
   state.running = false;
   state.paused = false;
+  state.pizza.running = false;
   state.mode='home';
   if (vegPause) vegPause.classList.add('hidden');
   answerInput.classList.remove('bottom-input');
@@ -1291,35 +1469,78 @@ answerInput.addEventListener('keydown', (e) => {
     if (!state.veg.timerId || !state.veg.started || state.paused) return;
     tryCutWord(val);
   } else if (state.mode==='pizza') {
-    const l = state.pizza.leftWord, r = state.pizza.rightWord;
+    if (state.paused || !state.pizza.running) return;
+    const l = state.pizza.leftWord, c = state.pizza.centerWord, r = state.pizza.rightWord;
     if (normalize(val)===normalize(l.target)) {
       state.pizza.playerSide='left'; setFam(l.id, getFam(l.id)+10);
-      const [lw, rw] = pickTwoWords();
+      const [lw, cw, rw] = pickThreeWords();
       state.pizza.leftWord = { id: lw.id, native: lw.native, target: lw.target };
+      state.pizza.centerWord = { id: cw.id, native: cw.native, target: cw.target };
+      state.pizza.rightWord = { id: rw.id, native: rw.native, target: rw.target };
+    } else if (normalize(val)===normalize(c.target)) {
+      state.pizza.playerSide='center'; setFam(c.id, getFam(c.id)+10);
+      const [lw, cw, rw] = pickThreeWords();
+      state.pizza.leftWord = { id: lw.id, native: lw.native, target: lw.target };
+      state.pizza.centerWord = { id: cw.id, native: cw.native, target: cw.target };
       state.pizza.rightWord = { id: rw.id, native: rw.native, target: rw.target };
     } else if (normalize(val)===normalize(r.target)) {
       state.pizza.playerSide='right'; setFam(r.id, getFam(r.id)+10);
-      const [lw, rw] = pickTwoWords();
+      const [lw, cw, rw] = pickThreeWords();
       state.pizza.leftWord = { id: lw.id, native: lw.native, target: lw.target };
+      state.pizza.centerWord = { id: cw.id, native: cw.native, target: cw.target };
       state.pizza.rightWord = { id: rw.id, native: rw.native, target: rw.target };
     } else {
       state.score = Math.max(0, state.score-50);
       state.pizza.feedbackTitle = 'Incorrect'; state.pizza.feedbackPenalty = 50;
-      state.pizza.feedbackUntil = now()+800; state.pizza.shakeUntil = now()+700;
-      // mark both words missed to flashcards
+      state.pizza.feedbackUntil = now()+999999999; // 非常に長い時間（再開ボタンで解除）
+      state.pizza.shakeUntil = now()+700;
+      // mark all words missed to flashcards
       state.missCounts[l.id] = (state.missCounts[l.id]||0)+1;
+      state.missCounts[c.id] = (state.missCounts[c.id]||0)+1;
       state.missCounts[r.id] = (state.missCounts[r.id]||0)+1;
       saveMisses(state.missCounts);
+      // ミスした時の3つの単語の答えを保存（ミス画面で表示用）
+      state.pizza.missedAnswers = {
+        left: l.target,
+        center: c.target,
+        right: r.target
+      };
+      // ミス画面で一時停止
+      state.pizza.pausedForMiss = true;
+      // 降ってくるオブジェクトを一番上に戻す
+      if (state.pizza.item) {
+        state.pizza.item.y = 40;
+      }
     }
   }
 });
 
 
 const checkAnswer = (val, usedVoice) => {
-  const e = state.currentWord; if (!e) return;
-  const ok = normalize(val)===normalize(e.expect);
-  debug('CHECK val=', val, 'expect=', e.expect, 'ok=', ok);
-  if (ok) { fireBulletToEnemy(e, usedVoice); } else { SFX.miss(); }
+  // ボスへの攻撃をチェック
+  if (state.boss && !state.boss.dead && normalize(val) === normalize(state.boss.expect)) {
+    fireBulletToEnemy({ id: 'boss' }, usedVoice);
+    debug('CHECK val=', val, 'target=BOSS');
+    return;
+  }
+  
+  // 画面に表示されているすべての敵をチェック
+  const aliveEnemies = state.enemies.filter(e => !e.dead);
+  if (aliveEnemies.length === 0) return;
+  
+  // 入力された答えに一致するすべての敵を見つける
+  const matchingEnemies = aliveEnemies.filter(e => normalize(val) === normalize(e.expect));
+  
+  if (matchingEnemies.length > 0) {
+    // 一致する敵すべてに攻撃
+    matchingEnemies.forEach(e => {
+      fireBulletToEnemy(e, usedVoice);
+    });
+    debug('CHECK val=', val, 'matched enemies=', matchingEnemies.length);
+  } else {
+    SFX.miss();
+    debug('CHECK val=', val, 'no match');
+  }
 };
 
 let recognition = null;
@@ -1363,6 +1584,35 @@ document.addEventListener('keydown', (e) => {
     } else if (state.mode === 'veg' && state.veg.started) {
       state.paused = !state.paused;
       updateVegPause();
+    } else if (state.mode === 'pizza' && state.pizza.running) {
+      state.paused = !state.paused;
+      if (state.paused) {
+        // ポーズ開始時：経過時間を記録
+        state.pizza.pausedTime = now();
+      } else {
+        // ポーズ解除時：startTimeを調整してタイマーを再開
+        const pausedDuration = now() - state.pizza.pausedTime;
+        state.pizza.startTime += pausedDuration;
+      }
+    }
+  } else if (e.key === ' ' && state.mode === 'pizza') {
+    e.preventDefault();
+    if (state.pizza.pausedForMiss) {
+      // SPACEキーでミス画面から再開
+      // 再抽選を行う
+      const [lw, cw, rw] = pickThreeWords();
+      state.pizza.leftWord = { id: lw.id, native: lw.native, target: lw.target };
+      state.pizza.centerWord = { id: cw.id, native: cw.native, target: cw.target };
+      state.pizza.rightWord = { id: rw.id, native: rw.native, target: rw.target };
+      state.pizza.missedAnswers = null; // 再抽選後はクリア
+      state.pizza.pausedForMiss = false; // 一時停止を解除
+      state.pizza.feedbackUntil = 0; // フィードバックをクリア
+    } else if (state.pizza.running && !state.paused && state.pizza.item) {
+      // スペースキーで画面に出ているオブジェクトを即座に落とす
+      const it = state.pizza.item;
+      // プレイヤーの位置まで即座に移動
+      const playerY = canvas.height - 60;
+      it.y = playerY - 5; // プレイヤーの少し上に配置（衝突判定を発動させるため）
     }
   }
 });
@@ -1382,21 +1632,43 @@ const pickTwoWords = () => {
   while (guard.has(b.id)) b = all[Math.floor(rand()*all.length)];
   return [a,b];
 };
+const pickThreeWords = () => {
+  const all = allWordsFlat();
+  const a = all[Math.floor(rand()*all.length)];
+  let b = all[Math.floor(rand()*all.length)];
+  let c = all[Math.floor(rand()*all.length)];
+  const guard = new Set([a.id]);
+  while (guard.has(b.id)) b = all[Math.floor(rand()*all.length)];
+  guard.add(b.id);
+  while (guard.has(c.id)) c = all[Math.floor(rand()*all.length)];
+  return [a,b,c];
+};
 const startPizza = () => {
   state.pizza.running = true;
+  state.paused = false;
   state.pizza.startTime = now();
   state.pizza.item = null;
-  const [lw, rw] = pickTwoWords();
+  state.pizza.lastItemType = null; // 前回のアイテムタイプをリセット
+  const [lw, cw, rw] = pickThreeWords();
   state.pizza.leftWord = { id: lw.id, native: lw.native, target: lw.target };
+  state.pizza.centerWord = { id: cw.id, native: cw.native, target: cw.target };
   state.pizza.rightWord = { id: rw.id, native: rw.native, target: rw.target };
   state.pizza.playerSide = 'center';
   requestAnimationFrame(tickPizza);
 };
 const spawnPizzaItem = () => {
-  const side = Math.random()<0.5? 'left':'right';
-  const type = Math.random()<0.6? 'pizza':'mold';
-  const x = side==='left'? 180 : canvas.width-180;
-  state.pizza.item = { type, side, x, y: 40, vy: 3.2 };
+  const randSide = Math.random();
+  const side = randSide < 0.33 ? 'left' : randSide < 0.67 ? 'center' : 'right';
+  // 前回がカビの場合は必ずピザにする（カビ連続防止）
+  let type;
+  if (state.pizza.lastItemType === 'mold') {
+    type = 'pizza';
+  } else {
+    type = Math.random()<0.6? 'pizza':'mold';
+  }
+  const x = side==='left'? 180 : side==='center'? canvas.width/2 : canvas.width-180;
+  state.pizza.item = { type, side, x, y: 40, vy: 3.2 / 2.5 }; // 2.5倍遅く
+  state.pizza.lastItemType = type; // 今回のタイプを記録
 };
 const drawPizza = () => {
   ctx.clearRect(0,0,canvas.width,canvas.height);
@@ -1420,6 +1692,15 @@ const drawPizza = () => {
   ctx.font = '28px system-ui'; const leftArrow = '⬅️'; const laW = ctx.measureText(leftArrow).width;
   ctx.fillText(leftArrow, leftBoxX + leftBoxW/2 - laW/2, yMid - boxH/2 - 8);
   ctx.font = '20px system-ui';
+  const centerTxt = state.pizza.centerWord.native;
+  let tCenterW = ctx.measureText(centerTxt).width;
+  const centerBoxW = tCenterW + padX*2; const centerBoxX = canvas.width/2 - centerBoxW/2;
+  ctx.fillStyle = 'rgba(15,23,42,0.8)'; ctx.strokeStyle = '#334155';
+  ctx.beginPath(); ctx.rect(centerBoxX, yMid - boxH/2, centerBoxW, boxH); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#e6edf3'; ctx.fillText(centerTxt, centerBoxX + padX, yMid + 7);
+  ctx.font = '28px system-ui'; const centerArrow = '⬆️'; const caW = ctx.measureText(centerArrow).width;
+  ctx.fillText(centerArrow, centerBoxX + centerBoxW/2 - caW/2, yMid - boxH/2 - 8);
+  ctx.font = '20px system-ui';
   const rightTxt = state.pizza.rightWord.native;
   let tRightW = ctx.measureText(rightTxt).width;
   const rightBoxW = tRightW + padX*2; const rightBoxX = canvas.width - 60 - rightBoxW;
@@ -1431,7 +1712,10 @@ const drawPizza = () => {
   // player dog
   ctx.font = '36px system-ui';
   const dog = '🐶';
-  let px = canvas.width/2; if (state.pizza.playerSide==='left') px = 120; if (state.pizza.playerSide==='right') px = canvas.width-120;
+  let px = canvas.width/2;
+  if (state.pizza.playerSide==='left') px = 120;
+  else if (state.pizza.playerSide==='center') px = canvas.width/2;
+  else if (state.pizza.playerSide==='right') px = canvas.width-120;
   ctx.fillText(dog, px - ctx.measureText(dog).width/2, canvas.height-60);
   // item
   if (!state.pizza.item) spawnPizzaItem();
@@ -1448,7 +1732,40 @@ const drawPizza = () => {
     ctx.fillText(text, (canvas.width-tw)/2, canvas.height/2);
     ctx.font = 'bold 40px system-ui'; const bonus = `+${state.pizza.successBonus}`; const bw = ctx.measureText(bonus).width;
     ctx.fillText(bonus, (canvas.width-bw)/2, canvas.height/2+56);
+  } else if (state.pizza.pausedForMiss) {
+    // ミス画面（一時停止中）
+    ctx.fillStyle = 'rgba(255,0,0,0.22)'; ctx.fillRect(0,0,canvas.width,canvas.height);
+    ctx.fillStyle = '#ef4444'; ctx.font = 'bold 64px system-ui';
+    const text = state.pizza.feedbackTitle; const tw = ctx.measureText(text).width;
+    ctx.fillText(text, (canvas.width-tw)/2, canvas.height/2 - 120);
+    ctx.font = 'bold 40px system-ui'; const pen = `-${state.pizza.feedbackPenalty}`; const pw = ctx.measureText(pen).width;
+    ctx.fillText(pen, (canvas.width-pw)/2, canvas.height/2 - 60);
+    // ミスした時の答えを各単語の真下に表示
+    if (state.pizza.missedAnswers) {
+      ctx.font = 'bold 28px system-ui';
+      ctx.fillStyle = '#e6edf3';
+      const answerY = yMid + boxH/2 + 30; // 単語ボックスの下に表示
+      // 左の単語の答え
+      const leftAnswer = state.pizza.missedAnswers.left;
+      const leftAnswerW = ctx.measureText(leftAnswer).width;
+      ctx.fillText(leftAnswer, leftBoxX + leftBoxW/2 - leftAnswerW/2, answerY);
+      // 真ん中の単語の答え
+      const centerAnswer = state.pizza.missedAnswers.center;
+      const centerAnswerW = ctx.measureText(centerAnswer).width;
+      ctx.fillText(centerAnswer, centerBoxX + centerBoxW/2 - centerAnswerW/2, answerY);
+      // 右の単語の答え
+      const rightAnswer = state.pizza.missedAnswers.right;
+      const rightAnswerW = ctx.measureText(rightAnswer).width;
+      ctx.fillText(rightAnswer, rightBoxX + rightBoxW/2 - rightAnswerW/2, answerY);
+    }
+    // 再開ボタンを表示
+    ctx.font = 'bold 48px system-ui';
+    ctx.fillStyle = '#22c55e';
+    const resumeText = 'Press SPACE to Resume';
+    const resumeW = ctx.measureText(resumeText).width;
+    ctx.fillText(resumeText, (canvas.width-resumeW)/2, canvas.height/2 + 180);
   } else if (t < state.pizza.feedbackUntil) {
+    // 通常のフィードバック画面（成功時など）
     ctx.fillStyle = 'rgba(255,0,0,0.22)'; ctx.fillRect(0,0,canvas.width,canvas.height);
     ctx.fillStyle = '#ef4444'; ctx.font = 'bold 64px system-ui';
     const text = state.pizza.feedbackTitle; const tw = ctx.measureText(text).width;
@@ -1456,15 +1773,33 @@ const drawPizza = () => {
     ctx.font = 'bold 40px system-ui'; const pen = `-${state.pizza.feedbackPenalty}`; const pw = ctx.measureText(pen).width;
     ctx.fillText(pen, (canvas.width-pw)/2, canvas.height/2+56);
   }
+  // ポーズ画面を描画
+  if (state.paused) {
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+    ctx.fillStyle = '#e6edf3';
+    ctx.font = 'bold 96px system-ui';
+    const text = 'PAUSED';
+    const tw = ctx.measureText(text).width;
+    ctx.fillText(text, (canvas.width - tw)/2, canvas.height/2);
+    ctx.restore();
+  }
 };
 const updatePizza = () => {
+  // ミス画面で一時停止中は処理をスキップ
+  if (state.pizza.pausedForMiss) {
+    return;
+  }
   const it = state.pizza.item; if (!it) return;
   it.y += it.vy;
   // collision zone near player
   const playerY = canvas.height-60;
   const near = Math.abs(it.y - playerY) < 40;
   if (near) {
-    if (state.pizza.playerSide==='left' && it.side==='left' || state.pizza.playerSide==='right' && it.side==='right') {
+    if (state.pizza.playerSide==='left' && it.side==='left' || 
+        state.pizza.playerSide==='center' && it.side==='center' || 
+        state.pizza.playerSide==='right' && it.side==='right') {
       if (it.type==='pizza') {
         state.score += 100;
         state.effects.push({ x: it.x, y: it.y, start: now(), duration: 400 });
@@ -1478,22 +1813,66 @@ const updatePizza = () => {
       state.pizza.item = null; spawnPizzaItem();
     } else {
       // avoided mold or missed pizza
-      if (it.type==='pizza') { /* no points */ }
+      if (it.type==='pizza') {
+        // ピザを拾えなかった場合もミス扱い
+        state.score = Math.max(0, state.score-50);
+        state.pizza.feedbackTitle = 'Missed Pizza'; state.pizza.feedbackPenalty = 50;
+        state.pizza.feedbackUntil = now()+800; state.pizza.shakeUntil = now()+700;
+        // ミスした時の3つの単語の答えを保存（ミス画面で表示用）
+        const l = state.pizza.leftWord, c = state.pizza.centerWord, r = state.pizza.rightWord;
+        state.pizza.missedAnswers = {
+          left: l.target,
+          center: c.target,
+          right: r.target
+        };
+        // ミス画面で一時停止
+        state.pizza.pausedForMiss = true;
+        state.pizza.feedbackUntil = now()+999999999; // 非常に長い時間（再開ボタンで解除）
+        // 降ってくるオブジェクトを一番上に戻す
+        if (state.pizza.item) {
+          state.pizza.item.y = 40;
+        }
+      }
       state.pizza.item = null; spawnPizzaItem();
     }
   } else if (it.y > canvas.height+20) {
-    // fell off screen, zero points
+    // fell off screen
+    if (it.type==='pizza') {
+      // ピザが落ちた場合もミス扱い
+      state.score = Math.max(0, state.score-50);
+      state.pizza.feedbackTitle = 'Missed Pizza'; state.pizza.feedbackPenalty = 50;
+      state.pizza.feedbackUntil = now()+999999999; // 非常に長い時間（再開ボタンで解除）
+      state.pizza.shakeUntil = now()+700;
+      // ミスした時の3つの単語の答えを保存（ミス画面で表示用）
+      const l = state.pizza.leftWord, c = state.pizza.centerWord, r = state.pizza.rightWord;
+      state.pizza.missedAnswers = {
+        left: l.target,
+        center: c.target,
+        right: r.target
+      };
+      // ミス画面で一時停止
+      state.pizza.pausedForMiss = true;
+      // 降ってくるオブジェクトを一番上に戻す（新しいアイテムが生成される前に）
+    }
     state.pizza.item = null; spawnPizzaItem();
+    // ピザが落ちた場合、新しいアイテムを生成した後、一番上に戻す
+    if (state.pizza.pausedForMiss && state.pizza.item) {
+      state.pizza.item.y = 40;
+    }
   }
 };
 const tickPizza = () => {
   if (state.mode!=='pizza' || !state.pizza.running) return;
-  updatePizza();
+  if (!state.paused && !state.pizza.pausedForMiss) {
+    updatePizza();
+  }
   drawPizza();
   // update HUD time in health label
-  const elapsed = now()-state.pizza.startTime; const left = Math.max(0, state.pizza.timeLimitMs - elapsed);
-  healthEl.textContent = (left/1000).toFixed(1);
-  scoreEl.textContent = Math.floor(state.score);
-  if (left<=0) { state.pizza.running=false; initHome(); return; }
+  if (!state.paused && !state.pizza.pausedForMiss) {
+    const elapsed = now()-state.pizza.startTime; const left = Math.max(0, state.pizza.timeLimitMs - elapsed);
+    healthEl.textContent = (left/1000).toFixed(1);
+    scoreEl.textContent = Math.floor(state.score);
+    if (left<=0) { state.pizza.running=false; initHome(); return; }
+  }
   requestAnimationFrame(tickPizza);
 };
